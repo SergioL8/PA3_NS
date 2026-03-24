@@ -10,7 +10,7 @@
 #define BUFF_SIZE 8192
 
 void open_server_socket(int *socket_fd, int port, struct sockaddr_in *socket_address);
-void open_client_socket(int *socket_fd, struct sockaddr_in *socket_address, char *host_ip, int port);
+int open_client_socket(int *socket_fd, struct sockaddr_in *socket_address, char *host_ip, int port);
 int parse_url(char *buffer, char* hostname, char **host_ip, int *port, char *path, char **body);
 int blocklist(char *hostname, char *host_ip);
 
@@ -97,7 +97,17 @@ int main(int argc, char* argv[]) {
         }
 
         /* open socket to http server */
-        open_client_socket(&http_sockfd, &httpaddr, host_ip, port);
+        int sock_success = 0;
+        if ((sock_success = (&http_sockfd, &httpaddr, host_ip, port)) == -1) {
+            const char *bad_gateway =
+                "HTTP/1.1 502 Bad Gateway\r\n"
+                "Content-Length: 0\r\n"
+                "Connection: close\r\n"
+                "\r\n";
+            send(client_sockfd, bad_gateway, strlen(bad_gateway), 0);
+            close(client_sockfd);
+            continue;
+        }
 
         /* build the request for the http server */
         snprintf(request, sizeof(request),
@@ -151,11 +161,11 @@ void open_server_socket(int *socket_fd, int port, struct sockaddr_in *socket_add
 
 
 
-void open_client_socket(int *socket_fd, struct sockaddr_in *socket_address, char *host_ip, int port) {
+int open_client_socket(int *socket_fd, struct sockaddr_in *socket_address, char *host_ip, int port) {
 
     if ((*socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         perror("Error opening socket");
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     socket_address->sin_family = AF_INET;
@@ -164,7 +174,9 @@ void open_client_socket(int *socket_fd, struct sockaddr_in *socket_address, char
 
     if ((connect(*socket_fd, (struct sockaddr*)socket_address, sizeof(*socket_address))) < 0) {
         perror("Error in connect");
-        exit(EXIT_FAILURE);
+        close(*socket_fd);
+        *socket_fd = -1;
+        return -1;
     }
 }
 
