@@ -48,7 +48,7 @@ int main(int argc, char* argv[]) {
     while(1) {
         if ((client_sockfd = accept(server_sockfd, (struct sockaddr*)&clientaddr, &client_addrlen)) < 0) {
             perror("ERROR in accept");
-            exit(EXIT_FAILURE);
+            continue;
         }
 
         /* read from socket */
@@ -64,20 +64,36 @@ int main(int argc, char* argv[]) {
         /* parse url */
         int parse_result = parse_url(c_p_buffer, hostname, &host_ip, &port, path, &body);
         if (parse_result == -1) {
-            char* bad_request = "400 bad request";
+            const char *bad_request =
+                "HTTP/1.1 400 Bad Request\r\n"
+                "Content-Length: 0\r\n"
+                "Connection: close\r\n"
+                "\r\n";
             send(client_sockfd, bad_request, strlen(bad_request), 0);
-            exit(EXIT_FAILURE);
+            close(client_sockfd);
+            continue;
         }
 
         /* check if request is in blocklist */
         int in_blocklist = blocklist(hostname, host_ip);
         if (in_blocklist == 1) {
-            char* forbidden = "403 Forbidden";
+            const char *forbidden =
+                "HTTP/1.1 403 Forbidden\r\n"
+                "Content-Length: 0\r\n"
+                "Connection: close\r\n"
+                "\r\n";
             send(client_sockfd, forbidden, strlen(forbidden), 0);
+            close(client_sockfd);
             continue;
         } else if (in_blocklist == -1) {
-            perror("Error in fopen");
-            exit(EXIT_FAILURE);
+            const char *server_error =
+                "HTTP/1.1 500 Internal Server Error\r\n"
+                "Content-Length: 0\r\n"
+                "Connection: close\r\n"
+                "\r\n";
+            send(client_sockfd, server_error, strlen(server_error), 0);
+            close(client_sockfd);
+            continue;
         }
 
         /* open socket to http server */
