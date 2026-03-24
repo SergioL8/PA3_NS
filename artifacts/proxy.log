@@ -1,0 +1,37 @@
+client connected and closed without sending anything: Success
+Error in connect: Connection refused
+First read length: 133
+First read: GET http://netsys.cs.colorado.edu/index.html HTTP/1.1
+Accept-Encoding: identity
+Host: netsys.cs.colorado.edu
+Connection: close
+
+
+First read length: 118
+First read: GET http://www.google.com/index.html HTTP/1.1
+Host: www.google.com
+Connection: close
+User-Agent: grading-script
+
+
+First read length: 118
+First read: GET http://mail.yahoo.com/index.html HTTP/1.1
+Host: mail.yahoo.com
+Connection: close
+User-Agent: grading-script
+
+
+First read length: 116
+First read: GET http://157.240.28.35/index.html HTTP/1.1
+Host: 157.240.28.35
+Connection: close
+User-Agent: grading-script
+
+
+First read length: 138
+First read: GET http://netsys.cs.colorado.edu/files/text1.txt HTTP/1.1
+Accept-Encoding: identity
+Host: netsys.cs.colorado.edu
+Connection: close
+
+

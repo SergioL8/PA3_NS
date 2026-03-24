@@ -4,7 +4,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define PORT 8080
+#define PORT 8000
 #define BUFF_SIZE 8192
 
 int main(int argc, char const* argv[])

@@ -8,8 +8,8 @@ SRCS = proxy.c
 all: $(TARGET)
 
 $(TARGET): $(SRCS)
-# 	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET) $(LIBS)
-	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET)
+	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET) $(LIBS)
+# 	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET)
 
 debug:
 	$(MAKE) CFLAGS="$(CFLAGS) -g -DDEBUG"

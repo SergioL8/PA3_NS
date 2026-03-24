@@ -31,12 +31,12 @@ int main(int argc, char* argv[]) {
     int port = 80;
     int bytes;
     char *body = NULL;
-    char *host_ip;
+    char *host_ip = NULL;
     char request[2048];
     
 
     /* Check correct number of command line arguments */
-    if (argc != 2) {
+    if (argc < 2) {
         perror("Please include one command line argument with the PORT #");
         exit(EXIT_FAILURE);
     }
@@ -52,13 +52,21 @@ int main(int argc, char* argv[]) {
         }
 
         /* read from socket */
-        read(client_sockfd, c_p_buffer, BUFF_SIZE - 1); 
+        int n = read(client_sockfd, c_p_buffer, BUFF_SIZE - 1); 
+        if (n == 0) {
+            perror("client connected and closed without sending anything");
+            close(client_sockfd);
+            continue;
+        }
+        c_p_buffer[n] = '\0';
+        
 
         /* parse url */
         int parse_result = parse_url(c_p_buffer, hostname, &host_ip, &port, path, &body);
         if (parse_result == -1) {
             char* bad_request = "400 bad request";
             send(client_sockfd, bad_request, strlen(bad_request), 0);
+            exit(EXIT_FAILURE);
         }
 
         /* check if request is in blocklist */
@@ -149,7 +157,7 @@ void open_client_socket(int *socket_fd, struct sockaddr_in *socket_address, char
 int parse_url(char *buffer, char* hostname, char **host_ip, int *port, char *path, char **body) {
 
     /* Variable declartion */
-    char request_method[3];
+    char request_method[4];
     char request_url[150];
     const char *p;
     const char *end;
@@ -158,7 +166,7 @@ int parse_url(char *buffer, char* hostname, char **host_ip, int *port, char *pat
 
     /* Parse the method and URL for validation */
     sscanf(buffer, "%s %s", request_method, request_url);
-    printf("Method: %s \nURL: %s \n", request_method, request_url);
+    // printf("Method: %s \nURL: %s \n", request_method, request_url);
 
     /* Validate method */
     if (strcmp(request_method, "GET") != 0) {  return -1;  }
@@ -219,8 +227,8 @@ int parse_url(char *buffer, char* hostname, char **host_ip, int *port, char *pat
 
     /* ------- get the body ------- */
     *body = strstr(buffer, "\r\n\r\n");
-    if (body != NULL) {
-        body += 4;  // move past the "\r\n\r\n"
+    if (*body != NULL) {
+        *body += 4;  // move past the "\r\n\r\n"
     }
     
     return 0;
