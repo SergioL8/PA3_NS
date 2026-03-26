@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <openssl/md5.h>
 
 #define BUFF_SIZE 8192
 
@@ -13,6 +14,7 @@ void open_server_socket(int *socket_fd, int port, struct sockaddr_in *socket_add
 int open_client_socket(int *socket_fd, struct sockaddr_in *socket_address, char *host_ip, int port);
 int parse_url(char *buffer, char* hostname, char **host_ip, int *port, char *path, char **body);
 int blocklist(char *hostname, char *host_ip);
+void md5_string(const char *input, char *output);
 
 int main(int argc, char* argv[]) {
 
@@ -289,4 +291,18 @@ int blocklist(char *hostname, char *host_ip) {
     }
     fclose(fp);
     return 0;
+}
+
+
+
+void md5_string(const char *input, char *output) {
+    unsigned char digest[MD5_DIGEST_LENGTH];
+
+    MD5((unsigned char*)input, strlen(input), digest);
+
+    for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
+        sprintf(&output[i * 2], "%02x", digest[i]);
+    }
+
+    output[MD5_DIGEST_LENGTH * 2] = '\0';
 }
