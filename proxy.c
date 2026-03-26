@@ -98,7 +98,7 @@ int main(int argc, char* argv[]) {
 
         /* open socket to http server */
         int sock_success = 0;
-        if ((sock_success = (&http_sockfd, &httpaddr, host_ip, port)) == -1) {
+        if ((sock_success = open_client_socket(&http_sockfd, &httpaddr, host_ip, port)) == -1) {
             const char *bad_gateway =
                 "HTTP/1.1 502 Bad Gateway\r\n"
                 "Content-Length: 0\r\n"
@@ -178,6 +178,7 @@ int open_client_socket(int *socket_fd, struct sockaddr_in *socket_address, char 
         *socket_fd = -1;
         return -1;
     }
+    return 0;
 }
 
 
