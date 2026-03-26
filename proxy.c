@@ -3,43 +3,44 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <openssl/md5.h>
+#include <pthread.h>
+#include <time.h>
 
 #define BUFF_SIZE 8192
 
+struct thread_args {
+    int client_sockfd;
+    int timeout;
+};
+
+void *handle_client_thread(void *arg);
 void open_server_socket(int *socket_fd, int port, struct sockaddr_in *socket_address);
 int open_client_socket(int *socket_fd, struct sockaddr_in *socket_address, char *host_ip, int port);
-int parse_url(char *buffer, char* hostname, char **host_ip, int *port, char *path, char **body);
+int parse_url(char *buffer, char *request_url, char* hostname, char **host_ip, int *port, char *path, char **body);
 int blocklist(char *hostname, char *host_ip);
 void md5_string(const char *input, char *output);
+int cache(char *hash, int timeout);
 
 int main(int argc, char* argv[]) {
 
     /* Variable declaration */
     int server_sockfd; /* socket */
     int client_sockfd; /* client socket */
-    int http_sockfd;
     struct sockaddr_in serveraddr; /* server's addr */
     struct sockaddr_in clientaddr; /* client addr */
-    struct sockaddr_in httpaddr;
+    
     socklen_t client_addrlen = sizeof(clientaddr); /* byte size of server's address */
-    char c_p_buffer[BUFF_SIZE]; /* client to proxy buffer for incoming get requests */
-    char s_p_buffer[BUFF_SIZE]; /* server to proxy buffer to receive the webapge  */
-    char path[1024];
-    char hostname[256];
-    int port = 80;
-    int bytes;
-    char *body = NULL;
-    char *host_ip = NULL;
-    char request[2048];
+
     
 
     /* Check correct number of command line arguments */
-    if (argc < 2) {
-        perror("Please include one command line argument with the PORT #");
+    if (argc != 3) {
+        perror("Please include one command line argument with the PORT # and timeout");
         exit(EXIT_FAILURE);
     }
 
@@ -48,56 +49,119 @@ int main(int argc, char* argv[]) {
 
     /* main loop to accept incoming connections */
     while(1) {
+
+        /* Accept client */
         if ((client_sockfd = accept(server_sockfd, (struct sockaddr*)&clientaddr, &client_addrlen)) < 0) {
             perror("ERROR in accept");
             continue;
         }
 
-        /* read from socket */
-        int n = read(client_sockfd, c_p_buffer, BUFF_SIZE - 1); 
-        if (n == 0) {
-            perror("client connected and closed without sending anything");
-            close(client_sockfd);
-            continue;
-        }
-        c_p_buffer[n] = '\0';
+        /* Create thread*/
+        pthread_t tid;
+        struct thread_args *args = malloc(sizeof(struct thread_args));
+        args->client_sockfd = client_sockfd;
+        args->timeout = atoi(argv[2]);
         
 
-        /* parse url */
-        int parse_result = parse_url(c_p_buffer, hostname, &host_ip, &port, path, &body);
-        if (parse_result == -1) {
-            const char *bad_request =
-                "HTTP/1.1 400 Bad Request\r\n"
-                "Content-Length: 0\r\n"
-                "Connection: close\r\n"
-                "\r\n";
-            send(client_sockfd, bad_request, strlen(bad_request), 0);
-            close(client_sockfd);
-            continue;
+        pthread_create(&tid, NULL, handle_client_thread, args);
+        pthread_detach(tid);
+    }
+}
+
+
+
+void *handle_client_thread(void *arg) {
+
+    /* unpack arguments*/
+    struct thread_args *args = (struct thread_args *)arg;
+    int client_sockfd = args->client_sockfd;
+    int timeout = args->timeout;
+
+    /* Variable declaration */
+    struct sockaddr_in httpaddr;
+    int http_sockfd;
+    char c_p_buffer[BUFF_SIZE]; /* client to proxy buffer for incoming get requests */
+    char s_p_buffer[BUFF_SIZE]; /* server to proxy buffer to receive the webapge  */
+    char cache_path[50] = "cache/";
+    char request_url[150];
+    char path[1024];
+    char hostname[256];
+    char *body = NULL;
+    char *host_ip = NULL;
+    char request[2048];
+    char hash[MD5_DIGEST_LENGTH * 2 +1];
+    int port = 80;
+    int bytes;
+    FILE *fptr;
+
+
+    /* read from socket */
+    int n = read(client_sockfd, c_p_buffer, BUFF_SIZE - 1); 
+    if (n == 0) {
+        perror("client connected and closed without sending anything");
+        close(client_sockfd);
+        return NULL;
+    }
+    c_p_buffer[n] = '\0';
+    
+
+    /* parse url */
+    int parse_result = parse_url(c_p_buffer, request_url, hostname, &host_ip, &port, path, &body);
+    if (parse_result == -1) {
+        const char *bad_request =
+            "HTTP/1.1 400 Bad Request\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        send(client_sockfd, bad_request, strlen(bad_request), 0);
+        close(client_sockfd);
+        return NULL;
+    }
+
+    /* check if request is in blocklist */
+    int in_blocklist = blocklist(hostname, host_ip);
+    if (in_blocklist == 1) {
+        const char *forbidden =
+            "HTTP/1.1 403 Forbidden\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        send(client_sockfd, forbidden, strlen(forbidden), 0);
+        close(client_sockfd);
+        return NULL;
+    } else if (in_blocklist == -1) {
+        const char *server_error =
+            "HTTP/1.1 500 Internal Server Error\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        send(client_sockfd, server_error, strlen(server_error), 0);
+        close(client_sockfd);
+        return NULL;
+    }
+
+    /* hash the url for caching */
+    md5_string(request_url, hash);
+
+    /* build the path to the file */
+    strcat(cache_path, hash);
+
+    /* check if file is chached */
+    if (cache(cache_path, timeout) == 1) {
+
+        printf("Reading from cache\n");
+
+        /*  open file */
+        fptr = fopen(cache_path, "rb");
+
+        /* read from file and send */
+        while ((bytes = fread(s_p_buffer, 1, sizeof(s_p_buffer), fptr)) > 0) {
+            send(client_sockfd, s_p_buffer, bytes, 0); // Send page bytes to client
         }
 
-        /* check if request is in blocklist */
-        int in_blocklist = blocklist(hostname, host_ip);
-        if (in_blocklist == 1) {
-            const char *forbidden =
-                "HTTP/1.1 403 Forbidden\r\n"
-                "Content-Length: 0\r\n"
-                "Connection: close\r\n"
-                "\r\n";
-            send(client_sockfd, forbidden, strlen(forbidden), 0);
-            close(client_sockfd);
-            continue;
-        } else if (in_blocklist == -1) {
-            const char *server_error =
-                "HTTP/1.1 500 Internal Server Error\r\n"
-                "Content-Length: 0\r\n"
-                "Connection: close\r\n"
-                "\r\n";
-            send(client_sockfd, server_error, strlen(server_error), 0);
-            close(client_sockfd);
-            continue;
-        }
+    } else {
 
+        printf("File not cached \n");
         /* open socket to http server */
         int sock_success = 0;
         if ((sock_success = open_client_socket(&http_sockfd, &httpaddr, host_ip, port)) == -1) {
@@ -108,7 +172,7 @@ int main(int argc, char* argv[]) {
                 "\r\n";
             send(client_sockfd, bad_gateway, strlen(bad_gateway), 0);
             close(client_sockfd);
-            continue;
+            return NULL;
         }
 
         /* build the request for the http server */
@@ -122,11 +186,24 @@ int main(int argc, char* argv[]) {
         /* send the request to the http server */
         send(http_sockfd, request, strlen(request), 0);
 
+        /* open file to cache */
+        printf("Cached path: %s\n", cache_path);
+        fptr = fopen(cache_path, "wb");
+        if (fptr == NULL) {
+            printf("File not created successfully \n");
+            exit(EXIT_FAILURE);
+        }
+
         /* get response from the server */
         while ((bytes = recv(http_sockfd, s_p_buffer, sizeof(s_p_buffer), 0)) > 0) {
-            send(client_sockfd, s_p_buffer, bytes, 0);
+            send(client_sockfd, s_p_buffer, bytes, 0); // Send page bytes to client
+            fwrite(s_p_buffer, 1, bytes, fptr); // Save page bytes to client
         }
+
+        /* Close the file */
+        fclose(fptr);
     }
+    return NULL;
 }
 
 
@@ -185,11 +262,10 @@ int open_client_socket(int *socket_fd, struct sockaddr_in *socket_address, char 
 
 
 
-int parse_url(char *buffer, char* hostname, char **host_ip, int *port, char *path, char **body) {
+int parse_url(char *buffer, char *request_url, char* hostname, char **host_ip, int *port, char *path, char **body) {
 
     /* Variable declartion */
     char request_method[4];
-    char request_url[150];
     const char *p;
     const char *end;
     size_t hostname_len;
@@ -305,4 +381,27 @@ void md5_string(const char *input, char *output) {
     }
 
     output[MD5_DIGEST_LENGTH * 2] = '\0';
+}
+
+
+
+int cache(char *path, int timeout) {
+
+    /* Variable declaration */
+    struct stat st;
+    time_t now = time(NULL);
+    double age;
+
+    /* Check if file exsits */
+    if (stat(path, &st) == 0) {
+        age = difftime(now, st.st_mtime);
+        if (age <= timeout) {
+            return 1; // Indicate URL is cached and not expired
+        } else {
+            if (remove(path) != 0) {
+                perror("Error deleteing file");
+            }
+        }
+    } 
+    return 0; // indicate that URL is not cached and must be cached
 }
